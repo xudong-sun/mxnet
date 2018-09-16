@@ -83,7 +83,7 @@ class ProposalTargetOp : public Operator {
     CHECK_EQ(req[proposal_target_enum::kBboxWeight], kWriteTo);
     
     Stream<xpu> *s = ctx.get_stream<xpu>();
-    const index_t num_image         = param_.batch_images;
+    const index_t num_image         = in_data[proposal_target_enum::kRois].shape_[0];
     const index_t num_roi           = in_data[proposal_target_enum::kRois].Size() / (num_image * 5);
     const index_t num_gtbbox        = in_data[proposal_target_enum::kGtBboxes].Size() / (num_image * 5);
     const index_t num_roi_per_image = param_.batch_rois / param_.batch_images;
@@ -150,12 +150,18 @@ class ProposalTargetOp : public Operator {
         bbox_weight[3] = param_.bbox_weight[3];
         for (index_t i = 0; i < num_image; ++i) {
           TensorContainer<cpu, 2, DType> kept_rois_i    (Shape2(kept_rois[i].size(),     rois.size(2)));
-          TensorContainer<cpu, 2, DType> kept_gtbboxes_i(Shape2(kept_gtbboxes[i].size(), rois.size(2)));
+          bool empty_flag = false;
+          index_t kept_gtbboxes_size_i = kept_gtbboxes[i].size();
           for (index_t j = 0; j < kept_rois_i.size(0); ++j) {
               Copy(kept_rois_i[j], kept_rois[i][j]);
           }
-          for (index_t j = 0; j < kept_gtbboxes_i.size(0); ++j) {
-              Copy(kept_gtbboxes_i[j], kept_gtbboxes[i][j]);
+          if (kept_gtbboxes_size_i == 0){
+            kept_gtbboxes_size_i = 1;
+            empty_flag = true;
+          }
+          TensorContainer<cpu, 2, DType> kept_gtbboxes_i(Shape2(kept_gtbboxes_size_i, rois.size(2)), 0.f);
+          for (index_t j = 0; j < kept_gtbboxes[i].size(); ++j) {
+            Copy(kept_gtbboxes_i[j], kept_gtbboxes[i][j]);
           }
 
           SampleROI(kept_rois_i, 
@@ -169,6 +175,7 @@ class ProposalTargetOp : public Operator {
                     param_.fg_thresh, 
                     param_.bg_thresh_hi, 
                     param_.bg_thresh_lo,
+                    empty_flag,
                     cpu_output_rois.Slice(i * num_roi_per_image, (i + 1) * num_roi_per_image), 
                     cpu_labels.Slice(i * num_roi_per_image, (i + 1) * num_roi_per_image), 
                     cpu_bbox_targets.Slice(i * num_roi_per_image, (i + 1) * num_roi_per_image), 

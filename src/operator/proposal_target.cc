@@ -30,33 +30,46 @@ inline void SampleROI(const Tensor<cpu, 2, DType> &all_rois,
                       const float fg_thresh,
                       const float bg_thresh_hi,
                       const float bg_thresh_lo,
+                      const bool empty_flag,
                       Tensor<cpu, 2, DType> &&rois,
                       Tensor<cpu, 1, DType> &&labels,
                       Tensor<cpu, 2, DType> &&bbox_targets,
                       Tensor<cpu, 2, DType> &&bbox_weights) {
   /*
-  overlaps = bbox_overlaps(rois[:, 1:].astype(np.float), gt_boxes[:, :4].astype(np.float))
-  gt_assignment = overlaps.argmax(axis=1)
-  overlaps = overlaps.max(axis=1)
-  labels = gt_boxes[gt_assignment, 4]
+  if len(gt_boxes) == 0:
+    gt_boxes = np.zeros((1, 5))
+    gt_assignment = np.zeros((len(rois), ), dtype=np.int32)
+    overlaps = np.zeros((len(rois), ))
+    labels = np.zeros((len(rois), ))
   */
-  TensorContainer<cpu, 2, DType> IOUs(Shape2(all_rois.size(0), gt_boxes.size(0)), 0.f);
-  BBoxOverlap(all_rois, gt_boxes, IOUs);
+
   vector<DType> max_overlaps(all_rois.size(0), 0.f);
   vector<DType> all_labels(all_rois.size(0), 0.f);
   vector<DType> gt_assignment(all_rois.size(0), 0.f);
-  for (index_t i = 0; i < IOUs.size(0); ++i) {
-      DType max_value = IOUs[i][0];
-      index_t max_index = 0;
-      for (index_t j = 1; j < IOUs.size(1); ++j) {
-        if (max_value < IOUs[i][j]) {
-            max_value = IOUs[i][j];
-            max_index = j;
+  if (empty_flag) {}
+  /*
+  else:
+    overlaps = bbox_overlaps(rois[:, 1:].astype(np.float), gt_boxes[:, :4].astype(np.float))
+    gt_assignment = overlaps.argmax(axis=1)
+    overlaps = overlaps.max(axis=1)
+    labels = gt_boxes[gt_assignment, 4]
+  */
+  else {
+    TensorContainer<cpu, 2, DType> IOUs(Shape2(all_rois.size(0), gt_boxes.size(0)), 0.f);
+    BBoxOverlap(all_rois, gt_boxes, IOUs);
+    for (index_t i = 0; i < IOUs.size(0); ++i) {
+        DType max_value = IOUs[i][0];
+        index_t max_index = 0;
+        for (index_t j = 1; j < IOUs.size(1); ++j) {
+          if (max_value < IOUs[i][j]) {
+              max_value = IOUs[i][j];
+              max_index = j;
+          }
         }
-      }
-      gt_assignment[i] = max_index;
-      max_overlaps[i] = max_value;
-      all_labels[i] = gt_boxes[max_index][4];
+        gt_assignment[i] = max_index;
+        max_overlaps[i] = max_value;
+        all_labels[i] = gt_boxes[max_index][4];
+    }
   }
   /*
   fg_indexes = np.where(overlaps >= config.TRAIN.FG_THRESH)[0]
