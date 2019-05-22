@@ -1,0 +1,12 @@
+name: mxnet
+version: 1.4.0
+
+extra_deps:
+  apt: libopenblas-dev
+
+build: |
+  git submodule update --init --recursive
+  [[ -n $CLEANUP ]] && rm -rf build
+  make -j $(nproc) USE_OPENCV=0 USE_BLAS=openblas USE_CUDA=1 USE_CUDA_PATH=/usr/local/cuda USE_CUDNN=1
+  install lib/libmxnet.so lib/
+  install_python python/mxnet
