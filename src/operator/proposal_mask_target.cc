@@ -17,11 +17,16 @@ using std::end;
 using std::random_shuffle;
 using std::log;
 
+namespace mshadow{
+
 template <typename DType>
-inline void convertPoly2Mask(const DType *roi,
-                             const DType *poly,
-                             const int mask_size,
-                             DType *mask){
+void convertPoly2Mask(const Tensor<cpu, 2, DType> &rois,
+                      const Tensor<cpu, 2, DType> &gt_polys,
+                      Tensor<cpu, 4, DType> &mask_targets,
+                      const vector<DType> &gt_assignment,
+                      const vector<index_t> &kept_indexes,
+                      const index_t mask_size,
+                      const index_t fg_rois_this_image){
      /* !
      Converts a polygon to a pre-defined mask wrt to an roi
      *****Inputs****
@@ -31,62 +36,62 @@ inline void convertPoly2Mask(const DType *roi,
      *****Outputs****
      overlap: overlap of each box in boxes1 to each box in boxes2
      */
-      DType w = roi[3] - roi[1];
-      DType h = roi[4] - roi[2];
-      w = max((DType)1., w);
-      h = max((DType)1., h);
-      int category = static_cast<int>(poly[0]);
-      int n_seg = static_cast<int>(poly[1]);
+  for (index_t i = 0; i < fg_rois_this_image; ++i) {
+    TensorContainer<cpu, 1, DType> poly(Shape1(gt_polys.size(1)), 0.f);
+    TensorContainer<cpu, 1, DType> roi(Shape1(rois.size(1)), 0.f);
+    Copy(poly, gt_polys[gt_assignment[kept_indexes[i]]]);
+    Copy(roi, rois[i]);
+    DType w = roi[3] - roi[1];
+    DType h = roi[4] - roi[2];
+    w = max((DType)1., w);
+    h = max((DType)1., h);
+    index_t category = static_cast<index_t>(poly[0]);
+    index_t n_seg = static_cast<index_t>(poly[1]);
 
-      if(!n_seg)
-          return;
+    if(!n_seg) return;
 
-      int offset = 2 + n_seg;
+    index_t offset = 2 + n_seg;
 
-      RLE* rles;
-      rlesInit(&rles, n_seg);
+    RLE* rles;
+    rlesInit(&rles, n_seg);
 
-      for(int i = 0; i < n_seg; i++) {
-        int cur_len = poly[i+2];
-//        double* xys = new double[cur_len];
-        double* xys = reinterpret_cast<double*>(malloc(sizeof(double) * cur_len));
-        for(int j = 0; j < cur_len; j++){
-          if (j % 2 == 0)
-            xys[j] = (poly[offset+j+1] - roi[2]) * mask_size / h;
-          else
-            xys[j] = (poly[offset+j-1] - roi[1]) * mask_size / w;
-
-        }
-        rleFrPoly(rles + i, xys, cur_len / 2, mask_size, mask_size);
-        free(xys);
-        offset += cur_len;
+    for(index_t k = 0; k < n_seg; k++) {
+      index_t cur_len = poly[k + 2];
+      double* xys = reinterpret_cast<double*>(malloc(sizeof(double) * cur_len));
+      for(index_t j = 0; j < cur_len; j++){
+        if (j % 2 == 0)
+          xys[j] = (poly[offset+j+1] - roi[2]) * mask_size / h;
+        else
+          xys[j] = (poly[offset+j-1] - roi[1]) * mask_size / w;
       }
+      rleFrPoly(rles + k, xys, cur_len / 2, mask_size, mask_size);
+      free(xys);
+      offset += cur_len;
+    }
 
       // Decode RLE to mask
-//      byte* byte_mask = new byte[mask_size*mask_size*n_seg];
-      byte* byte_mask = reinterpret_cast<byte*>(malloc(mask_size * mask_size * n_seg * sizeof(byte)));
-      rleDecode(rles, byte_mask, n_seg);
+    byte* byte_mask = reinterpret_cast<byte*>(malloc(mask_size * mask_size * n_seg * sizeof(byte)));
+    rleDecode(rles, byte_mask, n_seg);
 
-      DType* mask_cat = mask + category * mask_size * mask_size;
-      // Flatten mask
-      for(int j = 0; j < mask_size * mask_size; j++){
+    // Flatten mask
+    for(index_t j = 0; j < mask_size; j++) {
+      for(index_t k = 0; k < mask_size; k++) {
         DType cur_byte = 0;
-        for(int i = 0; i < n_seg; i++){
-          int offset = i * mask_size * mask_size + j;
+        for(index_t l = 0; l < n_seg; l++){
+          index_t offset = l * mask_size * mask_size + j * mask_size + k;
           if(byte_mask[offset] == 1){
             cur_byte = 1;
             break;
           }
         }
-        mask_cat[j] = cur_byte;
-      }
-
-      // Check to make sure we don't have memory leak
-      rlesFree(&rles, n_seg);
-      free(byte_mask);
+       mask_targets[i][category][j][k] = cur_byte;
+      }   
+    }
+    // Check to make sure we don't have memory leak
+    rlesFree(&rles, n_seg);
+    free(byte_mask);
+  }
 } // convertPoly2Mask
-
-namespace mshadow{
 
 template <typename DType>
 inline void SampleROIMask(const Tensor<cpu, 2, DType> &all_rois,
@@ -200,9 +205,7 @@ inline void SampleROIMask(const Tensor<cpu, 2, DType> &all_rois,
 
   ExpandBboxRegressionTargets(bbox_target_data, bbox_targets, bbox_weights, num_classes, bbox_weight);
 
-  for (index_t i=0; i < fg_rois_this_image; ++i)
-    convertPoly2Mask(rois[i].dptr_, gt_polys[gt_assignment[kept_indexes[i]]].dptr_, mask_size, mask_targets[i].dptr_);
-
+  convertPoly2Mask(rois, gt_polys, mask_targets, gt_assignment, kept_indexes, mask_size, fg_rois_this_image);
 }
 
 template <typename DType>

@@ -86,7 +86,6 @@ class ProposalMaskTargetOp : public Operator {
 
     Stream<xpu> *s = ctx.get_stream<xpu>();
     const index_t num_imgs = in_data[proposal_mask_target_enum::kRois].shape_[0];
-    const index_t num_gtbbox = in_data[proposal_mask_target_enum::kRois].shape_[1];
     const index_t poly_len =in_data[proposal_mask_target_enum::kGtPolys].shape_[2];
 
     Tensor<xpu, 3, DType> xpu_rois      = in_data[proposal_mask_target_enum::kRois].get<xpu, 3, DType>(s);
